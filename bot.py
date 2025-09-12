@@ -61,4 +61,4 @@ async def cmd_status(ctx):
 
 
 if __name__ == "__main__":
-    bot.run(BOT_TOKEN, bot= False)
+    bot.run(BOT_TOKEN)
