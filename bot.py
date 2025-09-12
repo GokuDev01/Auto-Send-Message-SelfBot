@@ -1,64 +1,84 @@
-import os
 import discord
+from discord.ext import commands, tasks
 import asyncio
-from discord.ext import commands
-from dotenv import load_dotenv
-from spam_manager import SpamManager
 
-load_dotenv()
+# A dictionary to keep track of running message tasks for each channel
+# Format: { channel_id: task_object }
+running_tasks = {}
 
-BOT_TOKEN = os.getenv("TOKEN")
-OWNER_ID = int(os.getenv("OWNER_ID", "0"))
-DEFAULT_MIN_INTERVAL = float(os.getenv("DEFAULT_MIN_INTERVAL", "2.0"))
-
-if not BOT_TOKEN or OWNER_ID == 0:
-    raise SystemExit("Set DISCORD_BOT_TOKEN and OWNER_ID in the environment.")
-
+# Use intents to allow the bot to see message content
 intents = discord.Intents.default()
 intents.message_content = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
-spam = SpamManager(min_interval=DEFAULT_MIN_INTERVAL)
-
-
-def owner_only():
-    async def predicate(ctx):
-        return ctx.author.id == OWNER_ID
-    return commands.check(predicate)
-
+# The '!' prefix is used for commands
+bot = commands.Bot(command_prefix='!', intents=intents)
 
 @bot.event
 async def on_ready():
-    print(f"Logged in as {username}#{discriminator} ({userid}).")
+    print(f'Logged in as {bot.user.name} ({bot.user.id})')
+    print('------')
 
-
-@bot.command(name="start")
-@owner_only()
-async def cmd_start(ctx, interval: float, *, message: str):
-    """Start sending `message` every `interval` seconds in this channel."""
-    if interval < spam.min_interval:
-        await ctx.send(f"Interval too short. Minimum is {spam.min_interval} seconds.")
+@bot.command()
+async def start(ctx, time: int, channel: discord.TextChannel, *, message: str):
+    """Starts sending a message to a specific channel on a timer."""
+    # Check if a task is already running for this channel
+    if channel.id in running_tasks:
+        await ctx.send(f"A message sender is already active in {channel.mention}.")
         return
-    if await spam.start(ctx.channel, message, interval):
-        await ctx.send(f"Started sending every {interval}s.")
+
+    # Create the background task
+    # The task will call the 'send_message' function
+    task = tasks.loop(seconds=time)(send_message)
+    
+    # Start the task and pass the required arguments
+    task.start(channel, message)
+    
+    # Store the task so we can stop it later
+    running_tasks[channel.id] = task
+    
+    await ctx.send(f"✅ Started sending '{message}' to {channel.mention} every {time} seconds.")
+
+async def send_message(channel: discord.TextChannel, message: str):
+    """The actual function that sends the message."""
+    try:
+        await channel.send(message)
+    except discord.Forbidden:
+        print(f"Error: Missing permissions to send messages in channel {channel.id}")
+        # Optionally, stop the task if permissions are lost
+        if channel.id in running_tasks:
+            running_tasks[channel.id].cancel()
+            del running_tasks[channel.id]
+    except Exception as e:
+        print(f"An error occurred in send_message for channel {channel.id}: {e}")
+
+@bot.command()
+async def stop(ctx, channel: discord.TextChannel):
+    """Stops the message sender for a specific channel."""
+    if channel.id in running_tasks:
+        running_tasks[channel.id].cancel()  # Stop the loop
+        del running_tasks[channel.id]       # Remove from our tracker
+        await ctx.send(f"⏹️ Stopped the message sender in {channel.mention}.")
     else:
-        await ctx.send("Already running. Use !stop first.")
+        await ctx.send(f"No message sender is currently active in {channel.mention}.")
 
+@bot.command()
+async def status(ctx):
+    """Shows the status of all currently running message senders."""
+    if not running_tasks:
+        await ctx.send("No message senders are currently active.")
+        return
 
-@bot.command(name="stop")
-@owner_only()
-async def cmd_stop(ctx):
-    if await spam.stop():
-        await ctx.send("Stopped.")
-    else:
-        await ctx.send("No spam running.")
+    # Create a nice looking embed for the status
+    embed = discord.Embed(title="Active Message Senders", color=discord.Color.blue())
+    status_report = ""
+    for channel_id, task in running_tasks.items():
+        channel_obj = bot.get_channel(channel_id)
+        if channel_obj:
+            # We can't easily get the message from the task, but we can show it's running
+            status_report += f"- **Channel:** {channel_obj.mention}\n"
+    
+    embed.description = status_report
+    await ctx.send(embed=embed)
 
-
-@bot.command(name="status")
-@owner_only()
-async def cmd_status(ctx):
-    await ctx.send(spam.status())
-
-
-if __name__ == "__main__":
-    bot.run(BOT_TOKEN)
+# Replace 'YOUR_BOT_TOKEN_HERE' with the token you copied from the Developer Portal
+bot.run('YOUR_BOT_TOKEN_HERE')
