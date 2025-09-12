@@ -1,27 +1,25 @@
 import asyncio
-import traceback
 from typing import Optional
 
 class SpamManager:
     def __init__(self, min_interval: float = 2.0):
+        self.min_interval = min_interval
         self.task: Optional[asyncio.Task] = None
-        self._lock = asyncio.Lock()
+        self._stop_event: Optional[asyncio.Event] = None
         self.channel = None
         self.message = ""
         self.interval = 0.0
-        self.min_interval = min_interval
-        self._stop_event: Optional[asyncio.Event] = None
+        self._lock = asyncio.Lock()
 
-    async def _loop(self, channel, message, interval, stop_event: asyncio.Event):
+    async def _loop(self, channel, message, interval, stop_event):
         try:
             while not stop_event.is_set():
                 await channel.send(message)
                 await asyncio.sleep(interval)
-        except Exception:
-            print("SpamManager loop error:")
-            traceback.print_exc()
+        except Exception as e:
+            print("Spam loop error:", e)
 
-    async def start(self, channel, message: str, interval: float) -> bool:
+    async def start(self, channel, message, interval) -> bool:
         async with self._lock:
             if self.task and not self.task.done():
                 return False
@@ -47,9 +45,10 @@ class SpamManager:
 
     def status(self) -> str:
         if self.task and not self.task.done():
-            ch = f"{self.channel.guild.name}/{self.channel.name}" if self.channel else "Unknown"
-            return (
-                f"Running — interval: {self.interval}s — channel: {ch} "
-                f"— message preview: {self.message[:150]!r}"
+            ch = (
+                f"{self.channel.guild.name}/{self.channel.name}"
+                if self.channel else "Unknown"
             )
+            preview = self.message[:150]
+            return f"Running — interval: {self.interval}s — channel: {ch} — message: {preview!r}"
         return "Not running."
