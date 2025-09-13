@@ -44,17 +44,13 @@ try:
 except Exception:
     INTERVAL_SECONDS = None
 
-# Configure intents (message_content may be needed for commands depending on your setup)
-intents = discord.Intents.default()
-intents.message_content = True
-
 # Try to construct a commands.Bot suitable for self-bot usage.
 # Some discord forks accept self_bot=True; official discord.py removed it.
 try:
-    bot = commands.Bot(command_prefix="?", self_bot=True, intents=intents)
+    bot = commands.Bot(command_prefix="?", self_bot=True)
 except TypeError:
     # fallback to creating a standard Bot; we'll detect run() support at runtime
-    bot = commands.Bot(command_prefix="?", intents=intents)
+    bot = commands.Bot(command_prefix="?", self_bot=True)
 
 @bot.event
 async def on_ready():
