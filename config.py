@@ -1,1 +1,7 @@
-{"userdata": {"token": "null", "hours": "null", "message": "null", "channelids": "null"}}
+{
+  "userdata": {
+    "interval_seconds": "null",
+    "message": "null",
+    "channelids": "null"
+  }
+}
