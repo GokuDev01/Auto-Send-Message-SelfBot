@@ -38,13 +38,17 @@ if not TOKEN:
     print(Fore.RED + "Error: " + Style.RESET_ALL + "DISCORD_TOKEN environment variable is missing. Exiting.")
     raise SystemExit(1)
 
+# Optional: allow default interval via env (takes precedence)
 INTERVAL_ENV = os.environ.get("INTERVAL_SECONDS")
 try:
     INTERVAL_SECONDS = int(INTERVAL_ENV) if INTERVAL_ENV is not None else None
 except Exception:
     INTERVAL_SECONDS = None
 
-bot = commands.Bot(command_prefix="?", self_bot=True, intents=discord.Intents.default())
+# Use standard Bot (supported). If you previously used a user token (self-bot), see notes below.
+intents = discord.Intents.default()
+intents.message_content = True  # if you need to inspect message content or use legacy command parsing
+bot = commands.Bot(command_prefix="?", intents=intents)
 
 @bot.event
 async def on_ready():
@@ -54,7 +58,6 @@ async def on_ready():
     if INTERVAL_SECONDS is not None:
         config["userdata"]["interval_seconds"] = INTERVAL_SECONDS
         await save_config(config)
-    # start advertise loop (it will adjust interval on first run)
     if not advertise_task.is_running():
         advertise_task.start()
 
@@ -63,12 +66,12 @@ async def advertise_task():
     config = await load_config()
     userdata = config.get("userdata", {})
     interval = parse_int(userdata.get("interval_seconds"), DEFAULT_INTERVAL)
-    # make loop follow configured interval dynamically
+    # Dynamically update the loop interval
     try:
-        if advertise_task._sleep_time != interval:  # avoid unnecessary change_interval calls
-            advertise_task.change_interval(seconds=interval)
+        # change_interval only when needed
+        advertise_task.change_interval(seconds=interval)
     except Exception:
-        # change_interval may raise if loop not yet started, ignore
+        # ignore if change_interval cannot be applied immediately
         pass
 
     channelids = userdata.get("channelids")
@@ -91,7 +94,7 @@ async def advertise_task():
                 print(f"{Fore.CYAN}[INFO]{Style.RESET_ALL} Channel id '{channel_id}' not found")
         except Exception as e:
             print(f"{Fore.CYAN}[INFO]{Style.RESET_ALL} Failed to send to channel id '{channel_id}': {e}")
-            # remove bad id
+            # Remove invalid ID from config
             config = await load_config()
             userdata = config.get("userdata", {})
             ids = userdata.get("channelids")
@@ -171,10 +174,13 @@ async def setinterval(ctx, *, seconds: str):
     try:
         advertise_task.change_interval(seconds=ival)
     except Exception:
-        # If not running yet, it will pick up interval on start
         pass
     print(f"Set interval to {ival} seconds.")
 
 if __name__ == "__main__":
-    # entry point: run the user client (self-bot). This call supports bot=False.
-    bot.run(TOKEN, bot=False)
+    # Use bot.run(TOKEN) without bot=False — 'bot' kwarg is not supported by modern discord.py
+    try:
+        bot.run(TOKEN)
+    except discord.LoginFailure:
+        print(Fore.RED + "Login failed: Invalid token or token type. Ensure you are using a Bot token (application) not a user token.")
+        raise
