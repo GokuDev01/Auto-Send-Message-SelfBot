@@ -1,8 +1,7 @@
 import os
 import json
 import base64
-import asyncio
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import aiofiles
 import discord
@@ -32,27 +31,36 @@ def parse_int(v: Any, default: int) -> int:
     except Exception:
         return default
 
-# Environment-driven configuration (no interactive prompts)
+# Read environment variables (non-interactive)
 TOKEN = os.environ.get("DISCORD_TOKEN")
 if not TOKEN:
     print(Fore.RED + "Error: " + Style.RESET_ALL + "DISCORD_TOKEN environment variable is missing. Exiting.")
     raise SystemExit(1)
 
-# Optional: allow default interval via env (takes precedence)
 INTERVAL_ENV = os.environ.get("INTERVAL_SECONDS")
 try:
     INTERVAL_SECONDS = int(INTERVAL_ENV) if INTERVAL_ENV is not None else None
 except Exception:
     INTERVAL_SECONDS = None
 
-# Use standard Bot (supported). If you previously used a user token (self-bot), see notes below.
+# NOTE: for a self‑bot you must install a self‑bot fork (e.g. discord.py-self).
+# This code tries to create a self-bot style Bot instance.
+# If you use an official bot token (recommended), remove self_bot=True and run normally.
 intents = discord.Intents.default()
-intents.message_content = True  # if you need to inspect message content or use legacy command parsing
-bot = commands.Bot(command_prefix="?", intents=intents)
+# If you need to read message content, enable the message_content intent
+intents.message_content = True
+
+# Create a Bot configured for self-bot usage (many forks accept self_bot=True)
+try:
+    bot = commands.Bot(command_prefix="?", self_bot=True, intents=intents)
+except TypeError:
+    # If the installed discord package does not support self_bot parameter,
+    # create a regular Bot object and we'll attempt to run with bot=False below.
+    bot = commands.Bot(command_prefix="?", intents=intents)
 
 @bot.event
 async def on_ready():
-    print(Fore.CYAN + "AdBot v1.1 - Logged in as " + Fore.RED + f'{bot.user.name}#{bot.user.discriminator}' + Style.RESET_ALL)
+    print(Fore.CYAN + "AdBot (self-bot style) - Logged in as " + Fore.RED + f'{bot.user.name}#{bot.user.discriminator}' + Style.RESET_ALL)
     # ensure config exists and apply environment interval if provided
     config = await load_config()
     if INTERVAL_SECONDS is not None:
@@ -66,12 +74,11 @@ async def advertise_task():
     config = await load_config()
     userdata = config.get("userdata", {})
     interval = parse_int(userdata.get("interval_seconds"), DEFAULT_INTERVAL)
+
     # Dynamically update the loop interval
     try:
-        # change_interval only when needed
         advertise_task.change_interval(seconds=interval)
     except Exception:
-        # ignore if change_interval cannot be applied immediately
         pass
 
     channelids = userdata.get("channelids")
@@ -86,6 +93,7 @@ async def advertise_task():
         except Exception:
             decoded = ""
         try:
+            # bot.get_channel works for guild text channels the bot/user can see
             channel = bot.get_channel(int(channel_id))
             if channel:
                 await channel.send(decoded)
@@ -178,9 +186,20 @@ async def setinterval(ctx, *, seconds: str):
     print(f"Set interval to {ival} seconds.")
 
 if __name__ == "__main__":
-    # Use bot.run(TOKEN) without bot=False — 'bot' kwarg is not supported by modern discord.py
+    # Try to run with bot=False (user token / self-bot). This parameter is not
+    # accepted by the official discord.py package, so it will raise TypeError
+    # unless you use a self-bot supporting fork (e.g., discord.py-self).
     try:
-        bot.run(TOKEN)
+        bot.run(TOKEN, bot=False)
+    except TypeError:
+        # Common cause: installed discord.py does not accept bot kwarg.
+        # Provide a helpful message so you can fix the environment.
+        print(Fore.RED + "TypeError: run() got an unexpected keyword argument 'bot'." + Style.RESET_ALL)
+        print("This happens when the installed discord.py package does not support running a self-bot.")
+        print("To run a user token (self-bot), install a compatible fork such as 'discord.py-self':")
+        print("    pip install -U discord.py-self")
+        print("Alternatively, use an application Bot token (recommended) and run without bot=False.")
+        raise
     except discord.LoginFailure:
-        print(Fore.RED + "Login failed: Invalid token or token type. Ensure you are using a Bot token (application) not a user token.")
+        print(Fore.RED + "Login failed: Invalid token or token type. If you're using a user token, ensure it is valid.")
         raise
