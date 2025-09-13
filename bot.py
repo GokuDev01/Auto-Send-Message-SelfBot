@@ -1,6 +1,7 @@
 import os
 import json
 import base64
+import inspect
 from typing import Any, Dict
 
 import aiofiles
@@ -43,25 +44,22 @@ try:
 except Exception:
     INTERVAL_SECONDS = None
 
-# NOTE: for a self‑bot you must install a self‑bot fork (e.g. discord.py-self).
-# This code tries to create a self-bot style Bot instance.
-# If you use an official bot token (recommended), remove self_bot=True and run normally.
+# Configure intents (message_content may be needed for commands depending on your setup)
 intents = discord.Intents.default()
-# If you need to read message content, enable the message_content intent
 intents.message_content = True
 
-# Create a Bot configured for self-bot usage (many forks accept self_bot=True)
+# Try to construct a commands.Bot suitable for self-bot usage.
+# Some discord forks accept self_bot=True; official discord.py removed it.
 try:
     bot = commands.Bot(command_prefix="?", self_bot=True, intents=intents)
 except TypeError:
-    # If the installed discord package does not support self_bot parameter,
-    # create a regular Bot object and we'll attempt to run with bot=False below.
+    # fallback to creating a standard Bot; we'll detect run() support at runtime
     bot = commands.Bot(command_prefix="?", intents=intents)
 
 @bot.event
 async def on_ready():
-    print(Fore.CYAN + "AdBot (self-bot style) - Logged in as " + Fore.RED + f'{bot.user.name}#{bot.user.discriminator}' + Style.RESET_ALL)
-    # ensure config exists and apply environment interval if provided
+    print(Fore.CYAN + "AdBot - Logged in as " + Fore.RED + f'{bot.user.name}#{bot.user.discriminator}' + Style.RESET_ALL)
+    # Ensure config exists and apply optional env interval
     config = await load_config()
     if INTERVAL_SECONDS is not None:
         config["userdata"]["interval_seconds"] = INTERVAL_SECONDS
@@ -75,7 +73,7 @@ async def advertise_task():
     userdata = config.get("userdata", {})
     interval = parse_int(userdata.get("interval_seconds"), DEFAULT_INTERVAL)
 
-    # Dynamically update the loop interval
+    # Update loop interval dynamically
     try:
         advertise_task.change_interval(seconds=interval)
     except Exception:
@@ -93,7 +91,6 @@ async def advertise_task():
         except Exception:
             decoded = ""
         try:
-            # bot.get_channel works for guild text channels the bot/user can see
             channel = bot.get_channel(int(channel_id))
             if channel:
                 await channel.send(decoded)
@@ -102,15 +99,15 @@ async def advertise_task():
                 print(f"{Fore.CYAN}[INFO]{Style.RESET_ALL} Channel id '{channel_id}' not found")
         except Exception as e:
             print(f"{Fore.CYAN}[INFO]{Style.RESET_ALL} Failed to send to channel id '{channel_id}': {e}")
-            # Remove invalid ID from config
-            config = await load_config()
-            userdata = config.get("userdata", {})
-            ids = userdata.get("channelids")
+            # Remove invalid ID from config so we don't keep failing on it
+            conf = await load_config()
+            ud = conf.get("userdata", {})
+            ids = ud.get("channelids")
             if isinstance(ids, list) and channel_id in ids:
                 ids.remove(channel_id)
-                userdata["channelids"] = ids
-                config["userdata"] = userdata
-                await save_config(config)
+                ud["channelids"] = ids
+                conf["userdata"] = ud
+                await save_config(conf)
 
 @bot.command()
 async def addchannel(ctx, *, id: str):
@@ -185,21 +182,33 @@ async def setinterval(ctx, *, seconds: str):
         pass
     print(f"Set interval to {ival} seconds.")
 
-if __name__ == "__main__":
-    # Try to run with bot=False (user token / self-bot). This parameter is not
-    # accepted by the official discord.py package, so it will raise TypeError
-    # unless you use a self-bot supporting fork (e.g., discord.py-self).
+def client_run_supports_bot_kw() -> bool:
+    """
+    Inspect discord.Client.run signature to see if it supports 'bot' keyword.
+    discord.py-self and some self-bot forks support bot kw; official discord.py removed it.
+    """
     try:
-        bot.run(TOKEN, bot=False)
-    except TypeError:
-        # Common cause: installed discord.py does not accept bot kwarg.
-        # Provide a helpful message so you can fix the environment.
-        print(Fore.RED + "TypeError: run() got an unexpected keyword argument 'bot'." + Style.RESET_ALL)
-        print("This happens when the installed discord.py package does not support running a self-bot.")
-        print("To run a user token (self-bot), install a compatible fork such as 'discord.py-self':")
+        sig = inspect.signature(discord.Client.run)
+        return 'bot' in sig.parameters
+    except Exception:
+        return False
+
+if __name__ == "__main__":
+    # If the installed discord package supports bot kw, run with bot=False for a user token.
+    if client_run_supports_bot_kw():
+        try:
+            bot.run(TOKEN, bot=False)
+        except discord.LoginFailure:
+            print(Fore.RED + "Login failed: Invalid token. If you are using a user token, ensure it is correct." + Style.RESET_ALL)
+            raise
+    else:
+        # Helpful guidance rather than blindly calling bot.run() and failing with TypeError
+        print(Fore.YELLOW + "The installed discord package does not support running a self-bot (no 'bot' kw on Client.run)." + Style.RESET_ALL)
+        print("To run a user token (self-bot), install a compatible fork that supports user tokens, such as 'discord.py-self'.")
+        print("Run:")
         print("    pip install -U discord.py-self")
-        print("Alternatively, use an application Bot token (recommended) and run without bot=False.")
-        raise
-    except discord.LoginFailure:
-        print(Fore.RED + "Login failed: Invalid token or token type. If you're using a user token, ensure it is valid.")
-        raise
+        print("Then redeploy.")
+        print()
+        print("If you'd rather run a proper application Bot (recommended), create a bot in the Discord Developer Portal, invite it to servers,")
+        print("set its token as DISCORD_TOKEN, and run this code with an up-to-date official discord.py package (and remove the self-bot expectations).")
+        raise SystemExit(2)
