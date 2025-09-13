@@ -1,7 +1,3 @@
-# Use this if you want to run with a user token (self-bot). Installing
-# discord.py-self provides the 'bot' kw argument and other self-bot compatibility.
-discord.py-self>=2.3.2
-
-# Async file IO and console coloring
+discord.py-self @ git+https://github.com/Just-Some-Bots/discord.py-self.git
 aiofiles>=23.2.1
 colorama>=0.4.6
