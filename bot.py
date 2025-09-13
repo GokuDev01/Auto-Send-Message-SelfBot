@@ -81,4 +81,4 @@ async def status(ctx):
     await ctx.send(embed=embed)
 
 # Replace 'YOUR_BOT_TOKEN_HERE' with the token you copied from the Developer Portal
-bot.run('YOUR_BOT_TOKEN_HERE')
+bot.run('MTE5NjA1Mjc1NDgyNTc2MDgyOA.Gi8V-d.BS3OufszwE6AiwHrDX4qyqa3cypTuPUepKiNVI')
