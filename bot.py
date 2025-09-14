@@ -9,10 +9,16 @@ import discord
 from discord.ext import commands, tasks
 from colorama import Fore, Style, init
 
+from keep_alive import keep_alive  # <--- NEW
+
 init(autoreset=True)
+keep_alive()  # <--- NEW
 
 CONFIG_PATH = "config.json"
 DEFAULT_INTERVAL = 60  # seconds
+
+# Add this global variable to control the sending loop
+advertise_paused = False
 
 async def load_config() -> Dict[str, Any]:
     try:
@@ -43,7 +49,6 @@ try:
 except Exception:
     INTERVAL_SECONDS = None
 
-# Create a self-bot instance
 bot = commands.Bot(command_prefix="?", self_bot=True)
 
 @bot.event
@@ -58,6 +63,10 @@ async def on_ready():
 
 @tasks.loop(seconds=DEFAULT_INTERVAL)
 async def advertise_task():
+    global advertise_paused
+    if advertise_paused:
+        return  # Do nothing if paused
+
     config = await load_config()
     userdata = config.get("userdata", {})
     interval = parse_int(userdata.get("interval_seconds"), DEFAULT_INTERVAL)
@@ -94,6 +103,22 @@ async def advertise_task():
                 ud["channelids"] = ids
                 conf["userdata"] = ud
                 await save_config(conf)
+
+@bot.command()
+async def stop(ctx):
+    """Pauses the advertisement sending everywhere."""
+    global advertise_paused
+    advertise_paused = True
+    await ctx.message.delete()
+    await ctx.send("✅ Advertising stopped everywhere.")
+
+@bot.command()
+async def start(ctx):
+    """Resumes the advertisement sending everywhere."""
+    global advertise_paused
+    advertise_paused = False
+    await ctx.message.delete()
+    await ctx.send("✅ Advertising resumed everywhere.")
 
 @bot.command()
 async def addchannel(ctx, *, id: str):
