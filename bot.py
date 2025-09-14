@@ -32,7 +32,6 @@ def parse_int(v: Any, default: int) -> int:
     except Exception:
         return default
 
-# Read environment variables (non-interactive)
 TOKEN = os.environ.get("DISCORD_TOKEN")
 if not TOKEN:
     print(Fore.RED + "Error: " + Style.RESET_ALL + "DISCORD_TOKEN environment variable is missing. Exiting.")
@@ -44,18 +43,12 @@ try:
 except Exception:
     INTERVAL_SECONDS = None
 
-# Try to construct a commands.Bot suitable for self-bot usage.
-# Some discord forks accept self_bot=True; official discord.py removed it.
-try:
-    bot = commands.Bot(command_prefix="?", self_bot=True)
-except TypeError:
-    # fallback to creating a standard Bot; we'll detect run() support at runtime
-    bot = commands.Bot(command_prefix="?", self_bot=True)
+# Create a self-bot instance
+bot = commands.Bot(command_prefix="?", self_bot=True)
 
 @bot.event
 async def on_ready():
     print(Fore.CYAN + "AdBot - Logged in as " + Fore.RED + f'{bot.user.name}#{bot.user.discriminator}' + Style.RESET_ALL)
-    # Ensure config exists and apply optional env interval
     config = await load_config()
     if INTERVAL_SECONDS is not None:
         config["userdata"]["interval_seconds"] = INTERVAL_SECONDS
@@ -68,8 +61,6 @@ async def advertise_task():
     config = await load_config()
     userdata = config.get("userdata", {})
     interval = parse_int(userdata.get("interval_seconds"), DEFAULT_INTERVAL)
-
-    # Update loop interval dynamically
     try:
         advertise_task.change_interval(seconds=interval)
     except Exception:
@@ -95,7 +86,6 @@ async def advertise_task():
                 print(f"{Fore.CYAN}[INFO]{Style.RESET_ALL} Channel id '{channel_id}' not found")
         except Exception as e:
             print(f"{Fore.CYAN}[INFO]{Style.RESET_ALL} Failed to send to channel id '{channel_id}': {e}")
-            # Remove invalid ID from config so we don't keep failing on it
             conf = await load_config()
             ud = conf.get("userdata", {})
             ids = ud.get("channelids")
@@ -178,33 +168,5 @@ async def setinterval(ctx, *, seconds: str):
         pass
     print(f"Set interval to {ival} seconds.")
 
-def client_run_supports_bot_kw() -> bool:
-    """
-    Inspect discord.Client.run signature to see if it supports 'bot' keyword.
-    discord.py-self and some self-bot forks support bot kw; official discord.py removed it.
-    """
-    try:
-        sig = inspect.signature(discord.Client.run)
-        return 'bot' in sig.parameters
-    except Exception:
-        return False
-
 if __name__ == "__main__":
-    # If the installed discord package supports bot kw, run with bot=False for a user token.
-    if client_run_supports_bot_kw():
-        try:
-            bot.run(TOKEN, bot=False)
-        except discord.LoginFailure:
-            print(Fore.RED + "Login failed: Invalid token. If you are using a user token, ensure it is correct." + Style.RESET_ALL)
-            raise
-    else:
-        # Helpful guidance rather than blindly calling bot.run() and failing with TypeError
-        print(Fore.YELLOW + "The installed discord package does not support running a self-bot (no 'bot' kw on Client.run)." + Style.RESET_ALL)
-        print("To run a user token (self-bot), install a compatible fork that supports user tokens, such as 'discord.py-self'.")
-        print("Run:")
-        print("    pip install -U discord.py-self")
-        print("Then redeploy.")
-        print()
-        print("If you'd rather run a proper application Bot (recommended), create a bot in the Discord Developer Portal, invite it to servers,")
-        print("set its token as DISCORD_TOKEN, and run this code with an up-to-date official discord.py package (and remove the self-bot expectations).")
-        raise SystemExit(2)
+    bot.run(TOKEN)
