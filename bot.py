@@ -9,15 +9,14 @@ import discord
 from discord.ext import commands, tasks
 from colorama import Fore, Style, init
 
-from keep_alive import keep_alive  # <--- NEW
+from keep_alive import keep_alive
 
 init(autoreset=True)
-keep_alive()  # <--- NEW
+keep_alive()
 
 CONFIG_PATH = "config.json"
-DEFAULT_INTERVAL = 60  # seconds
+DEFAULT_INTERVAL = 60
 
-# Add this global variable to control the sending loop
 advertise_paused = False
 
 async def load_config() -> Dict[str, Any]:
@@ -65,7 +64,7 @@ async def on_ready():
 async def advertise_task():
     global advertise_paused
     if advertise_paused:
-        return  # Do nothing if paused
+        return
 
     config = await load_config()
     userdata = config.get("userdata", {})
@@ -106,7 +105,6 @@ async def advertise_task():
 
 @bot.command()
 async def stop(ctx):
-    """Pauses the advertisement sending everywhere."""
     global advertise_paused
     advertise_paused = True
     await ctx.message.delete()
@@ -114,11 +112,37 @@ async def stop(ctx):
 
 @bot.command()
 async def start(ctx):
-    """Resumes the advertisement sending everywhere."""
     global advertise_paused
     advertise_paused = False
     await ctx.message.delete()
     await ctx.send("✅ Advertising resumed everywhere.")
+
+@bot.command()
+async def status(ctx):
+    await ctx.message.delete()
+    config = await load_config()
+    userdata = config.get("userdata", {})
+    interval = userdata.get("interval_seconds", DEFAULT_INTERVAL)
+    channelids = userdata.get("channelids")
+    message_b64 = userdata.get("message")
+    try:
+        msg = base64.b64decode(message_b64 or "").decode("utf-8")
+    except Exception:
+        msg = ""
+    if msg and len(msg) > 64:
+        msg = msg[:61] + "..."
+
+    env = "Render" if os.environ.get("RENDER") else "unknown"
+    status_text = (
+        f"**AdBot Status**\n"
+        f"Running: {'❌ Paused' if advertise_paused else '✅ Running'}\n"
+        f"Interval: {interval} seconds\n"
+        f"Channels: {len(channelids) if isinstance(channelids, list) else 0}\n"
+        f"Message: `{msg}`\n"
+        f"Bot: {bot.user.name}#{bot.user.discriminator}\n"
+        f"Environment: {env}\n"
+    )
+    await ctx.send(status_text)
 
 @bot.command()
 async def addchannel(ctx, *, id: str):
