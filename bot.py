@@ -134,13 +134,12 @@ async def status(ctx):
 
     env = "Render" if os.environ.get("RENDER") else "unknown"
     status_text = (
-        f"**AdBot Status**\n"
+        f"**Current Status**\n"
         f"Running: {'❌ Paused' if advertise_paused else '✅ Running'}\n"
         f"Interval: {interval} seconds\n"
         f"Channels: {len(channelids) if isinstance(channelids, list) else 0}\n"
         f"Message: `{msg}`\n"
         f"Bot: {bot.user.name}#{bot.user.discriminator}\n"
-        f"Environment: {env}\n"
     )
     await ctx.send(status_text)
 
