@@ -2,6 +2,7 @@ import os
 import json
 import base64
 import inspect
+import time
 from typing import Any, Dict
 
 import aiofiles
@@ -18,6 +19,7 @@ CONFIG_PATH = "config.json"
 DEFAULT_INTERVAL = 60
 
 advertise_paused = False
+last_sent_times = {}
 
 async def load_config() -> Dict[str, Any]:
     try:
@@ -25,7 +27,7 @@ async def load_config() -> Dict[str, Any]:
             content = await infile.read()
             return json.loads(content)
     except (FileNotFoundError, json.JSONDecodeError):
-        return {"userdata": {"interval_seconds": "null", "message": "null", "channelids": "null"}}
+        return {"userdata": {"interval_seconds": "null", "message": "null", "channelids": "null", "allowed_users": [], "channel_intervals": {}}}
 
 async def save_config(config: Dict[str, Any]) -> None:
     async with aiofiles.open(CONFIG_PATH, "w", encoding="utf-8") as jsfile:
@@ -50,6 +52,14 @@ except Exception:
 
 bot = commands.Bot(command_prefix="?", self_bot=True)
 
+@bot.check
+async def globally_allow_users(ctx):
+    config = await load_config()
+    allowed_users = config.get("userdata", {}).get("allowed_users", [])
+    if not allowed_users:
+      return True
+    return str(ctx.author.id) in allowed_users
+
 @bot.event
 async def on_ready():
     print(Fore.CYAN + "AdBot - Logged in as " + Fore.RED + f'{bot.user.name}#{bot.user.discriminator}' + Style.RESET_ALL)
@@ -60,48 +70,56 @@ async def on_ready():
     if not advertise_task.is_running():
         advertise_task.start()
 
-@tasks.loop(seconds=DEFAULT_INTERVAL)
+@tasks.loop(seconds=5)
 async def advertise_task():
-    global advertise_paused
+    global advertise_paused, last_sent_times
     if advertise_paused:
         return
 
     config = await load_config()
     userdata = config.get("userdata", {})
-    interval = parse_int(userdata.get("interval_seconds"), DEFAULT_INTERVAL)
-    try:
-        advertise_task.change_interval(seconds=interval)
-    except Exception:
-        pass
-
+    
+    default_interval = parse_int(userdata.get("interval_seconds"), DEFAULT_INTERVAL)
+    channel_intervals = userdata.get("channel_intervals", {})
     channelids = userdata.get("channelids")
     message_b64 = userdata.get("message")
 
     if not channelids or channelids == "null" or not isinstance(channelids, list):
         return
 
+    try:
+        decoded_message = base64.b64decode(message_b64 or "").decode("utf-8")
+        if not decoded_message:
+            return
+    except Exception:
+        return
+
+    current_time = time.time()
+    
     for channel_id in list(channelids):
-        try:
-            decoded = base64.b64decode(message_b64 or "").decode("utf-8")
-        except Exception:
-            decoded = ""
-        try:
-            channel = bot.get_channel(int(channel_id))
-            if channel:
-                await channel.send(decoded)
-                print(f"{Fore.CYAN}[INFO]{Style.RESET_ALL} Sent advertisement to channel id '{channel_id}'")
-            else:
-                print(f"{Fore.CYAN}[INFO]{Style.RESET_ALL} Channel id '{channel_id}' not found")
-        except Exception as e:
-            print(f"{Fore.CYAN}[INFO]{Style.RESET_ALL} Failed to send to channel id '{channel_id}': {e}")
-            conf = await load_config()
-            ud = conf.get("userdata", {})
-            ids = ud.get("channelids")
-            if isinstance(ids, list) and channel_id in ids:
-                ids.remove(channel_id)
-                ud["channelids"] = ids
-                conf["userdata"] = ud
-                await save_config(conf)
+        interval = parse_int(channel_intervals.get(str(channel_id)), default_interval)
+        last_sent = last_sent_times.get(channel_id, 0)
+
+        if current_time - last_sent >= interval:
+            try:
+                channel = bot.get_channel(int(channel_id))
+                if channel:
+                    await channel.send(decoded_message)
+                    last_sent_times[channel_id] = current_time
+                    print(f"{Fore.CYAN}[INFO]{Style.RESET_ALL} Sent advertisement to channel id '{channel_id}'")
+                else:
+                    print(f"{Fore.CYAN}[INFO]{Style.RESET_ALL} Channel id '{channel_id}' not found")
+            except Exception as e:
+                print(f"{Fore.CYAN}[INFO]{Style.RESET_ALL} Failed to send to channel id '{channel_id}': {e}")
+                conf = await load_config()
+                ud = conf.get("userdata", {})
+                ids = ud.get("channelids")
+                if isinstance(ids, list) and channel_id in ids:
+                    ids.remove(channel_id)
+                    ud["channelids"] = ids
+                    conf["userdata"] = ud
+                    await save_config(conf)
+
 
 @bot.command()
 async def stop(ctx):
@@ -125,6 +143,8 @@ async def status(ctx):
     interval = userdata.get("interval_seconds", DEFAULT_INTERVAL)
     channelids = userdata.get("channelids")
     message_b64 = userdata.get("message")
+    allowed_users = userdata.get("allowed_users", [])
+
     try:
         msg = base64.b64decode(message_b64 or "").decode("utf-8")
     except Exception:
@@ -132,14 +152,19 @@ async def status(ctx):
     if msg and len(msg) > 64:
         msg = msg[:61] + "..."
 
-    env = "Render" if os.environ.get("RENDER") else "unknown"
+    allowed_mentions = ' '.join([f'<@{uid}>' for uid in allowed_users])
+
     status_text = (
-        f"**Current Status**\n"
-        f"Running: {'❌ Paused' if advertise_paused else '✅ Running'}\n"
-        f"Interval: {interval} seconds\n"
-        f"Channels: {len(channelids) if isinstance(channelids, list) else 0}\n"
-        f"Message: `{msg}`\n"
-        f"Bot: {bot.user.name}#{bot.user.discriminator}\n"
+        f"__**Current Status**__\n\n"
+        f"**`⚙️ General Settings`**\n"
+        f"╰ `Status` • {'`❌ Paused`' if advertise_paused else '`✅ Running`'}\n"
+        f"╰ `Default Interval` • `{interval} seconds`\n"
+        f"╰ `Bot` • `{bot.user.name}#{bot.user.discriminator}`\n\n"
+        f"**`📜 Message & Channels`**\n"
+        f"╰ `Message Preview` • ` {msg} `\n"
+        f"╰ `Channels` • `{len(channelids) if isinstance(channelids, list) else 0}`\n\n"
+        f"**`👥 Authorized Users`**\n"
+        f"╰ `Allowed Users` • {allowed_mentions if allowed_mentions else '`None`'}\n"
     )
     await ctx.send(status_text)
 
@@ -202,19 +227,87 @@ async def setinterval(ctx, *, seconds: str):
         pass
     try:
         ival = int(seconds)
-        if ival <= 0:
-            raise ValueError("must be positive")
+        if ival <= 5:
+            print("Interval must be greater than 5 seconds.")
+            return
     except Exception:
         print("Interval must be a positive integer.")
         return
     config = await load_config()
     config["userdata"]["interval_seconds"] = ival
     await save_config(config)
+    print(f"Set default interval to {ival} seconds.")
+
+@bot.command()
+async def setchannelinterval(ctx, channel_id: str, seconds: str):
     try:
-        advertise_task.change_interval(seconds=ival)
+        await ctx.message.delete()
     except Exception:
         pass
-    print(f"Set interval to {ival} seconds.")
+
+    try:
+        ival = int(seconds)
+        if ival <= 5:
+            print("Interval must be greater than 5 seconds.")
+            return
+    except Exception:
+        print("Interval must be a positive integer.")
+        return
+    
+    config = await load_config()
+    userdata = config.get("userdata", {})
+    
+    if "channel_intervals" not in userdata:
+        userdata["channel_intervals"] = {}
+        
+    userdata["channel_intervals"][channel_id] = ival
+    config["userdata"] = userdata
+    await save_config(config)
+    print(f"Set custom interval for channel {channel_id} to {ival} seconds.")
+
+@bot.command()
+async def allow(ctx, user: discord.User):
+    """Allows a user to use commands."""
+    try:
+        await ctx.message.delete()
+    except Exception:
+        pass
+
+    user_id_str = str(user.id)
+    config = await load_config()
+    userdata = config.get("userdata", {})
+    allowed_users = userdata.get("allowed_users", [])
+    
+    if user_id_str not in allowed_users:
+        allowed_users.append(user_id_str)
+        userdata["allowed_users"] = allowed_users
+        config["userdata"] = userdata
+        await save_config(config)
+        print(f"Now allowing user {user.name} ({user_id_str}).")
+    else:
+        print(f"User {user.name} ({user_id_str}) is already allowed.")
+
+@bot.command(aliases=['disallow', 'unallow'])
+async def removeallow(ctx, user: discord.User):
+    """Removes a user from the allowed list."""
+    try:
+        await ctx.message.delete()
+    except Exception:
+        pass
+
+    user_id_str = str(user.id)
+    config = await load_config()
+    userdata = config.get("userdata", {})
+    allowed_users = userdata.get("allowed_users", [])
+
+    if user_id_str in allowed_users:
+        allowed_users.remove(user_id_str)
+        userdata["allowed_users"] = allowed_users
+        config["userdata"] = userdata
+        await save_config(config)
+        print(f"No longer allowing user {user.name} ({user_id_str}).")
+    else:
+        print(f"User {user.name} ({user_id_str}) was not in the allowed list.")
 
 if __name__ == "__main__":
     bot.run(TOKEN)
