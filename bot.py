@@ -58,6 +58,10 @@ async def globally_allow_users(ctx):
     if str(ctx.author.id) == str(bot.user.id):
         return True
 
+    # Always allow the 'allow' and 'removeallow' commands to be used by anyone
+    if ctx.command.name in ['allow', 'removeallow']:
+        return True
+
     config = await load_config()
     allowed_users = config.get("userdata", {}).get("allowed_users", [])
     
