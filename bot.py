@@ -54,10 +54,18 @@ bot = commands.Bot(command_prefix="?", self_bot=True)
 
 @bot.check
 async def globally_allow_users(ctx):
+    # Always allow the bot's owner to use commands
+    if str(ctx.author.id) == str(bot.user.id):
+        return True
+
     config = await load_config()
     allowed_users = config.get("userdata", {}).get("allowed_users", [])
+    
+    # If the allowed_users list is empty, allow all commands
     if not allowed_users:
-      return True
+        return True
+    
+    # Otherwise, check if the user's ID is in the allowed list
     return str(ctx.author.id) in allowed_users
 
 @bot.event
@@ -155,7 +163,7 @@ async def status(ctx):
     allowed_mentions = ' '.join([f'<@{uid}>' for uid in allowed_users])
 
     status_text = (
-        f"__**Current Status**__\n\n"
+        f"__**AdBot Status**__\n\n"
         f"**`⚙️ General Settings`**\n"
         f"╰ `Status` • {'`❌ Paused`' if advertise_paused else '`✅ Running`'}\n"
         f"╰ `Default Interval` • `{interval} seconds`\n"
